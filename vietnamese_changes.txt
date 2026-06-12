@@ -1,0 +1,113 @@
+================================================================================
+CHI TIẾT CÁC THAY ĐỔI ĐỂ HUẤN LUYỆN FASTSPEECH 2 CHO TIẾNG VIỆT
+================================================================================
+
+Codebase hiện tại của bạn được phát triển dựa trên repository "sp1007/FastSpeech2_vi",
+được tối ưu hóa và cấu hình lại từ mã nguồn FastSpeech 2 gốc (ming024/FastSpeech2)
+vốn chỉ hỗ trợ tiếng Anh (LJSpeech) hoặc tiếng Trung (AISHELL3).
+
+Dưới đây là chi tiết tất cả các thành phần được thay đổi, bổ sung và thiết lập 
+để huấn luyện mô hình nói được tiếng Việt:
+
+--------------------------------------------------------------------------------
+1. CHUẨN HÓA VĂN BẢN TIẾNG VIỆT (TEXT CLEANERS & NORMALIZATION)
+--------------------------------------------------------------------------------
+Mô hình TTS cần đưa văn bản thô về dạng chữ chuẩn trước khi chuyển sang âm vị.
+- Thư mục liên quan: text/
+
+* File: text/cleaners.py
+  - Bổ sung hàm `vietnamese_cleaners(text)` làm sạch văn bản tiếng Việt.
+  - Định nghĩa bộ từ viết tắt tiếng Việt `_abbreviations_vi` để tự động dịch:
+    + "tp" -> "thành phố", "tw" -> "trung ương", "vn" -> "việt nam"
+    + "clb" -> "câu lạc bộ", "cty" -> "công ty", "ubnd" -> "ủy ban nhân dân"
+    + "thpt" -> "trung học phổ thông", "thcs" -> "trung học cơ sở"
+    + "đc" -> "được", "ngta" -> "người ta", "tv" -> "ti vi", v.v.
+
+* File: text/numbers_vi.py (Tạo mới)
+  - Được phát triển bởi tác giả Son Pham (sp1007).
+  - Tự động chuẩn hóa toàn bộ các định dạng số sang chữ nói tiếng Việt tự nhiên:
+    + Số đếm thông thường: hỗ trợ đọc đúng ngữ cảnh như "mốt" / "một", "lăm" / "năm", "tư" / "bốn".
+      Ví dụ: "15" -> "mười lăm", "21" -> "hai mươi mốt".
+    + Số thập phân: dùng từ "phẩy" để nối (ví dụ: "3,14" -> "ba phẩy mười bốn").
+    + Ngày tháng: phát hiện dạng ngày/tháng/năm và thêm từ khóa tương ứng (ví dụ: "12/6/2026" -> "ngày mười hai tháng sáu năm hai nghìn không trăm hai mươi sáu").
+    + Giờ giấc: định dạng "12h30" hoặc "12:30" -> "mười hai giờ ba mươi phút".
+    + Ký hiệu đơn vị & tiền tệ: tự động chuyển đổi các đơn vị như "vnd" / "d" -> "đồng", "%" -> "phần trăm", "km" -> "kilô mét", "kg" -> "kilô gram", "°C" -> "độ xê", v.v.
+    + Số La Mã: tự động convert sang số đếm tương ứng trước khi đọc (ví dụ: "thế kỷ XXI" -> "thế kỷ hai mươi mốt").
+
+--------------------------------------------------------------------------------
+2. BỘ ĐỊNH NGHĨA ÂM VỊ & KÝ TỰ TIẾNG VIỆT (PHONEMES & SYMBOLS)
+--------------------------------------------------------------------------------
+Tiếng Việt là ngôn ngữ đơn âm tiết và có thanh điệu (tone-based language). Việc này đòi hỏi
+phải định nghĩa lại hoàn toàn cách chuyển đổi từ chữ viết sang biểu diễn âm vị học.
+
+* File: text/vietnamese_phonemes.py (Tạo mới)
+  - Khai báo danh sách `valid_symbols` chứa tất cả các âm vị tiếng Việt hợp lệ bao gồm:
+    + Phụ âm đầu (Onset): b, c, ch, d, đ, g, gh, gi, h, k, kh, l, m, n, ng, ngh, nh, p, ph, qu, r, s, t, th, tr, v, x.
+    + Nguyên âm đơn/kép/ba cùng với thanh điệu (Nucleus + Tone): Từng nguyên âm được gán thêm ký số từ 1 đến 5 đại diện cho các thanh (1: Sắc, 2: Huyền, 3: Hỏi, 4: Ngã, 5: Nặng; không ghi số đại diện cho thanh Ngang/Không dấu). 
+      Ví dụ: vần "iết" mang thanh sắc -> "ieet1", vần "uồn" mang thanh huyền -> "uo0n2".
+    + Phụ âm cuối (Coda): c, ch, ng, nh, m, n, p, t, k.
+  - Hàm `parse_word(word)` phân tách một từ tiếng Việt thô thành cấu trúc âm vị học chi tiết (Phụ âm đầu + Nguyên âm/Vần + Thanh điệu + Phụ âm cuối) một cách tự động khi từ đó không có trong từ điển.
+
+* File: text/symbols.py
+  - Tạo bộ ký tự `symbols_vi` chứa:
+    + Bảng ký tự chữ cái tiếng Việt đầy đủ (`_letters_vi`) bao gồm các nguyên âm có dấu đặc trưng (ă, â, đ, ê, ô, ơ, ư,...).
+    + Danh sách âm vị tiếng Việt được import từ `text/vietnamese_phonemes.py`.
+    + Các ký tự khoảng lặng dừng (`_silences` bao gồm "@sp", "@spn", "@sil").
+
+* File: text/__init__.py
+  - Cập nhật hàm `text_to_sequence` và `sequence_to_text` để nhận diện cờ ngôn ngữ tiếng Việt. Nếu cleaner_names chứa "vietnamese_cleaners", hệ thống sẽ ánh xạ chuỗi âm vị sang ID từ danh sách `symbols_vi` thay vì bộ ký tự tiếng Anh gốc.
+
+--------------------------------------------------------------------------------
+3. TỪ ĐIỂN PHÁT ÂM TIẾNG VIỆT (LEXICON)
+--------------------------------------------------------------------------------
+* File: lexicon/vi-new-lexicon.txt (Tạo mới)
+  - Chứa hơn 7,000 từ vựng tiếng Việt phổ dụng đã được phiên âm sẵn sang dạng âm vị phân tách bằng dấu cách.
+  - Ví dụ ánh xạ từ điển:
+    + ba     b a
+    + biết   b ieet1
+    + buồn   b uo0n2
+    + bảy    b ay3
+    + bọc    b oc5
+  - File này được sử dụng trong cả quá trình căn lề (alignment) dữ liệu và quá trình chạy suy luận tổng hợp (inference/synthesis).
+
+--------------------------------------------------------------------------------
+4. BỘ TIỀN XỬ LÝ & TỔNG HỢP GIỌNG NÓI (PREPROCESSING & INFERENCE)
+--------------------------------------------------------------------------------
+* File: preprocessor/preprocessor.py
+  - Cấu hình lại cơ chế đọc dữ liệu đầu vào. Hỗ trợ định dạng file nhãn văn bản tiếng Việt dạng `.lab` mã hóa `utf-8`.
+  - Đồng bộ hóa độ dài giữa spectrogram âm thanh thực tế với độ dài âm vị được trích xuất từ file căn lề (`TextGrid`) của tiếng Việt.
+
+* File: synthesize.py
+  - Tích hợp hàm `preprocess_vietnamese(text, preprocess_config)`:
+    + Thay thế các dấu câu tự nhiên (như `. , ; ? ! :`) thành các khoảng lặng nghỉ dài ngắn tương ứng bằng nhãn `<sp>`.
+    + Làm sạch chữ viết qua bộ dọn dẹp tiếng Việt.
+    + Phân tích từng từ: Nếu từ nằm trong từ điển `vi-new-lexicon.txt`, nó sẽ được dịch nhanh sang âm vị. Nếu từ đó không có sẵn (từ mượn, từ lạ), nó sẽ tự động chạy hàm fallback `viphonemes.parse_word(w)` để giải cấu trúc âm tiết đó và trả về âm vị suy luận.
+
+--------------------------------------------------------------------------------
+5. THIẾT LẬP CẤU HÌNH (CONFIGURATIONS)
+--------------------------------------------------------------------------------
+* Thư mục: config/vi_ljspeech/ (Tạo mới dựa trên khuôn mẫu LJSpeech của tiếng Anh)
+  - File: preprocess.yaml
+    + Thiết lập ngôn ngữ đầu vào: `language: "vi"`.
+    + Thiết lập bộ dọn dẹp tiếng Việt: `text_cleaners: ["vietnamese_cleaners"]`.
+    + Chỉ định đường dẫn lexicon: `lexicon_path: "lexicon/vi-new-lexicon.txt"`.
+    + Định nghĩa cấu hình thư mục lưu mel-spectrogram, pitch, energy và duration cho dữ liệu tiếng Việt.
+  - File: model.yaml & train.yaml
+    + Cấu hình đường dẫn đầu ra cho checkpoint lưu mô hình, thư mục logs huấn luyện tiếng Việt riêng biệt.
+
+--------------------------------------------------------------------------------
+6. CÁC TIỆN ÍCH HỖ TRỢ TRONG THƯ MỤC LÀM VIỆC CỦA BẠN
+--------------------------------------------------------------------------------
+Trong thư mục hiện tại của bạn, có 2 script hữu ích được tạo thêm để hỗ trợ quá trình huấn luyện thực tế:
+
+* File: monitor_training.py (Tạo mới trong workspace)
+  - Chạy độc lập hoặc song song với quá trình train để ghi nhận và giám sát tiến trình huấn luyện.
+  - Đọc log huấn luyện thô của `train.py` tại `./output/log/vi_ljspeech/train/log.txt`.
+  - Tính toán tốc độ huấn luyện thời gian thực (`it/s`), hiển thị % tiến độ huấn luyện, in ra các chỉ số loss (Mel Loss, Pitch Loss, Energy Loss, Duration Loss) một cách đẹp mắt.
+  - Đọc trạng thái GPU (qua `nvidia-smi`) để ghi nhận lượng VRAM tiêu hao, hiệu năng GPU sử dụng và nhiệt độ của card đồ họa.
+  - Tất cả các thông số được xuất ra file báo cáo: `output/log/vi_ljspeech/train/metrics_log.txt`.
+
+* File: fix_align.py (Tạo mới trong workspace)
+  - Giúp quét và sửa các file căn lề TextGrid sau khi chạy bộ căn lề MFA (Montreal Forced Aligner).
+  - Tự động tìm các khoảng căn lề trống không chứa ký tự (`text = ""`) và điền nhãn khoảng lặng nghỉ (`text = "sp"`). Việc này giúp ngăn chặn các lỗi mất đồng bộ dữ liệu hoặc crash chương trình trong quá trình trích xuất mel-spectrogram và thời lượng âm tiết (duration).
+================================================================================
