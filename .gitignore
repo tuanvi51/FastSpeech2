@@ -121,5 +121,6 @@ input/
 preprocessed_data/
 temp/
 vi_ljspeech_data/
+en_ljspeech_data/
 tmp/
 *.lnk
