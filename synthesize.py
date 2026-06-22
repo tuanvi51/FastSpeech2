@@ -88,7 +88,7 @@ def preprocess_mandarin(text, preprocess_config):
 def preprocess_vietnamese(text, preprocess_config):
     lexicon = read_lexicon(preprocess_config["path"]["lexicon_path"])
 
-    text = text.replace(',', ' <sp> <sp> <sp> ').replace('.', ' <sp> <sp> <sp> <sp> ').replace(';', ' <sp> <sp> <sp> ').replace('?', ' <sp> <sp> <sp> <sp> ').replace('!', ' <sp> <sp> <sp> <sp> ').replace(':', ' <sp> <sp> <sp> <sp> ')
+    text = text.replace(',', ' <sp> ').replace('.', ' <sp> <sp> ').replace(';', ' <sp> ').replace('?', ' <sp> <sp> ').replace('!', ' <sp> <sp> ').replace(':', ' <sp> <sp> ')
     text = clean_vietnamese_text(text)
     phones = []
     words = re.split(r"([,;.\-\?\!\s+])", text)
@@ -115,6 +115,11 @@ def synthesize(model, step, configs, vocoder, batchs, control_values):
     preprocess_config, model_config, train_config = configs
     pitch_control, energy_control, duration_control = control_values
 
+    from text.symbols import get_symbols
+    is_vietnamese = preprocess_config["preprocessing"]["text"]["language"] == "vi"
+    symbols = get_symbols(is_vietnamese)
+    sil_ids = [symbols.index(s) for s in ["@sp", "@spn", "@sil"] if s in symbols]
+
     for batch in batchs:
         batch = to_device(batch, device)
         with torch.no_grad():
@@ -125,6 +130,21 @@ def synthesize(model, step, configs, vocoder, batchs, control_values):
                 e_control=energy_control,
                 d_control=duration_control
             )
+            
+            # Post-process to force absolute silence (-11.5129) on <sp> frames
+            # for b in range(len(batch[3])):
+            #     text = batch[3][b]
+            #     durations = output[5][b]
+            #     
+            #     current_frame = 0
+            #     for phoneme_id, d in zip(text, durations):
+            #         d_val = int(d.item())
+            #         if phoneme_id.item() in sil_ids:
+            #             if d_val > 0:
+            #                 output[0][b, current_frame : current_frame + d_val] = -11.5129
+            #                 output[1][b, current_frame : current_frame + d_val] = -11.5129
+            #         current_frame += d_val
+
             synth_samples(
                 batch,
                 output,
